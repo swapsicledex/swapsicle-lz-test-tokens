@@ -7,7 +7,6 @@ NETWORK=fuji
 NETWORK=telos_testnet
 NETWORK=mantle_testnet
 
-npx hardhat --network $NETWORK deploy --tags LzNativeTest
 npx hardhat --network $NETWORK deploy --tags LzTest
 
 npx hardhat --network $NETWORK sourcify
@@ -24,7 +23,6 @@ In case, find LayerZero endpoints at <https://layerzero.gitbook.io/docs/> > Tech
 After deploying the tokens to all networks, you need to set the trusted remotes for the tokens, as follows (run for each $NETWORK):
 
 ```
-npx hardhat --network $NETWORK lz-remotes LzNativeTest
 npx hardhat --network $NETWORK lz-remotes LzTest
 ```
 
@@ -64,6 +62,5 @@ npx hardhat --network $NETWORK lz-send AMOUNT CONTRACT_NAME DESTINATION_NETWORK_
 Examples:
 
 ```
-npx hardhat --network fuji lz-send 1 LzNativeTest mantle_testnet
 npx hardhat --network fuji lz-send 11 LzTest mantle_testnet
 ```
