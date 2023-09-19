@@ -8,6 +8,8 @@ const lzSend = task('lz-send', 'Bridge token via LayerZero')
   .addPositionalParam('contractName', 'contract name')
   .addPositionalParam('networkName', 'the network name as in hardhat.config.js')
   .addOptionalParam('recipient', 'address to send to')
+  .addOptionalParam('gas', 'Gas used in the adapterParams (default 200000)')
+  .addOptionalParam('debug', 'Debug')
   .setAction(async (args) => {
     const [owner] = await ethers.getSigners()
     const contractName = args.contractName
@@ -21,17 +23,13 @@ const lzSend = task('lz-send', 'Bridge token via LayerZero')
     let toAddressBytes = ethers.utils.defaultAbiCoder.encode(['address'],[toAddress])
     let remoteChainId = config.networks[args.networkName].chainId
     let lzChainId = CHAIN_INFO[remoteChainId].lzChainId
-    console.log(`Sending to ${args.networkName} = chainId ${remoteChainId} => lzChainId ${lzChainId}`)
+    let gas = parseInt(args.gas) || 200000
+    let adapterParams = ethers.utils.solidityPack(["uint16", "uint256"], [1, gas])
+
+    if (args.debug) console.log(`Sending to ${args.networkName} = chainId ${remoteChainId} => lzChainId ${lzChainId}`)
     let recipientArg = args.recipient ? ` --recipient ${args.recipient}` : ""
     Logger.info(`npx hardhat --network ${network.name} lz-send ${args.amount} ${contractName} ${args.networkName}${recipientArg}`)
-    let adapterParams = ethers.utils.solidityPack(["uint16", "uint256"], [1, 200000])
-    Logger.info(`Using v1 adapterParams [1, 200000]`)
-    // let adapterParams = ethers.utils.solidityPack(
-    //   ["uint16", "uint", "uint", "address"],
-    //   // [2, 200000, 55555555555, toAddress]
-    //   [2, 200000, 0, toAddress]
-    // )
-    // Logger.info(`Using v2 adapterParams [2, 200000, 0, ${toAddress}]`)
+    
     let sendFromParams = [
       owner.address,
       lzChainId,
@@ -42,14 +40,14 @@ const lzSend = task('lz-send', 'Bridge token via LayerZero')
     try {
       let fees = await token.estimateSendFee(lzChainId, toAddressBytes, amount, false, adapterParams)
       let fee = fees[0]
-      console.log(`fee (wei): ${fee} / (eth): ${toETH(fee)}`)
+      Logger.info(`fee (wei): ${fee} / (eth): ${toETH(fee)}`)
 
       let tx = await (await token.sendFrom(...sendFromParams, { value: fee })).wait()
       let recipient = args.recipient ? `${args.recipient} ` : ""
       Logger.info(`[${network.name} => ${args.networkName}] sent ${args.amount} ${contractName} to ${recipient}@ LZ chainId[${lzChainId}] tx: ${tx.transactionHash}`)
     } catch (e) {
       Logger.error(e)
-      throw e
+      if (args.debug) throw e
     }
   })
 
