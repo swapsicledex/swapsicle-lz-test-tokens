@@ -23,6 +23,16 @@ abstract contract LzApp is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicatio
     mapping(uint16 => uint) public payloadSizeLimitLookup;
     address public precrime;
 
+    error InvalidAdapterParams();
+    error InvalidDestinationChain();
+    error InvalidEndpointCaller();
+    error InvalidMinGas();
+    error InvalidSourceSendingContract();
+    error MinGasLimitNotSet();
+    error NoTrustedPathRecord();
+    error PayloadSizeTooLarge();
+    error GasLimitTooLow();
+
     event SetPrecrime(address precrime);
     event SetTrustedRemote(uint16 _remoteChainId, bytes _path);
     event SetTrustedRemoteAddress(uint16 _remoteChainId, bytes _remoteAddress);
@@ -34,11 +44,11 @@ abstract contract LzApp is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicatio
 
     function lzReceive(uint16 _srcChainId, bytes calldata _srcAddress, uint64 _nonce, bytes calldata _payload) public virtual override {
         // lzReceive must be called by the endpoint for security
-        require(_msgSender() == address(lzEndpoint), "LzApp: invalid endpoint caller");
+        if (_msgSender() != address(lzEndpoint)) revert InvalidEndpointCaller();
 
         bytes memory trustedRemote = trustedRemoteLookup[_srcChainId];
         // if will still block the message pathway from (srcChainId, srcAddress). should not receive message from untrusted remote.
-        require(_srcAddress.length == trustedRemote.length && trustedRemote.length > 0 && keccak256(_srcAddress) == keccak256(trustedRemote), "LzApp: invalid source sending contract");
+        if (_srcAddress.length != trustedRemote.length || trustedRemote.length == 0 || keccak256(_srcAddress) != keccak256(trustedRemote)) revert InvalidSourceSendingContract();
 
         _blockingLzReceive(_srcChainId, _srcAddress, _nonce, _payload);
     }
@@ -48,7 +58,7 @@ abstract contract LzApp is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicatio
 
     function _lzSend(uint16 _dstChainId, bytes memory _payload, address payable _refundAddress, address _zroPaymentAddress, bytes memory _adapterParams, uint _nativeFee) internal virtual {
         bytes memory trustedRemote = trustedRemoteLookup[_dstChainId];
-        require(trustedRemote.length != 0, "LzApp: destination chain is not a trusted source");
+        if (trustedRemote.length == 0) revert InvalidDestinationChain();
         _checkPayloadSize(_dstChainId, _payload.length);
         lzEndpoint.send{value: _nativeFee}(_dstChainId, trustedRemote, _payload, _refundAddress, _zroPaymentAddress, _adapterParams);
     }
@@ -56,12 +66,12 @@ abstract contract LzApp is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicatio
     function _checkGasLimit(uint16 _dstChainId, uint16 _type, bytes memory _adapterParams, uint _extraGas) internal view virtual {
         uint providedGasLimit = _getGasLimit(_adapterParams);
         uint minGasLimit = minDstGasLookup[_dstChainId][_type] + _extraGas;
-        require(minGasLimit > 0, "LzApp: minGasLimit not set");
-        require(providedGasLimit >= minGasLimit, "LzApp: gas limit is too low");
+        if (minGasLimit == 0) revert MinGasLimitNotSet();
+        if (providedGasLimit < minGasLimit) revert GasLimitTooLow();
     }
 
     function _getGasLimit(bytes memory _adapterParams) internal pure virtual returns (uint gasLimit) {
-        require(_adapterParams.length >= 34, "LzApp: invalid adapterParams");
+        if (_adapterParams.length < 34) revert InvalidAdapterParams();
         assembly {
             gasLimit := mload(add(_adapterParams, 34))
         }
@@ -72,7 +82,7 @@ abstract contract LzApp is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicatio
         if (payloadSizeLimit == 0) { // use default if not set
             payloadSizeLimit = DEFAULT_PAYLOAD_SIZE_LIMIT;
         }
-        require(_payloadSize <= payloadSizeLimit, "LzApp: payload size is too large");
+        if (_payloadSize > payloadSizeLimit) revert PayloadSizeTooLarge();
     }
 
     //---------------------------UserApplication config----------------------------------------
@@ -111,7 +121,7 @@ abstract contract LzApp is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicatio
 
     function getTrustedRemoteAddress(uint16 _remoteChainId) public view returns (bytes memory) {
         bytes memory path = trustedRemoteLookup[_remoteChainId];
-        require(path.length != 0, "LzApp: no trusted path record");
+        if (path.length == 0) revert NoTrustedPathRecord();
         return path.slice(0, path.length - 20); // the last 20 bytes should be address(this)
     }
 
@@ -121,7 +131,7 @@ abstract contract LzApp is Ownable, ILayerZeroReceiver, ILayerZeroUserApplicatio
     }
 
     function setMinDstGas(uint16 _dstChainId, uint16 _packetType, uint _minGas) external onlyOwner {
-        require(_minGas > 0, "LzApp: invalid minGas");
+        if (_minGas == 0) revert InvalidMinGas();
         minDstGasLookup[_dstChainId][_packetType] = _minGas;
         emit SetMinDstGas(_dstChainId, _packetType, _minGas);
     }

@@ -13,12 +13,16 @@ import "../../util/ExcessivelySafeCall.sol";
 abstract contract NonblockingLzApp is LzApp {
     using ExcessivelySafeCall for address;
 
-    constructor(address _endpoint) LzApp(_endpoint) {}
-
     mapping(uint16 => mapping(bytes => mapping(uint64 => bytes32))) public failedMessages;
+
+    error CallerMustBeLzApp();
+    error InvalidPayload();
+    error NoStoredMessage();
 
     event MessageFailed(uint16 _srcChainId, bytes _srcAddress, uint64 _nonce, bytes _payload, bytes _reason);
     event RetryMessageSuccess(uint16 _srcChainId, bytes _srcAddress, uint64 _nonce, bytes32 _payloadHash);
+
+    constructor(address _endpoint) LzApp(_endpoint) {}
 
     // overriding the virtual function in LzReceiver
     function _blockingLzReceive(uint16 _srcChainId, bytes memory _srcAddress, uint64 _nonce, bytes memory _payload) internal virtual override {
@@ -36,7 +40,7 @@ abstract contract NonblockingLzApp is LzApp {
 
     function nonblockingLzReceive(uint16 _srcChainId, bytes calldata _srcAddress, uint64 _nonce, bytes calldata _payload) public virtual {
         // only internal transaction
-        require(_msgSender() == address(this), "NonblockingLzApp: caller must be LzApp");
+        if (_msgSender() != address(this)) revert CallerMustBeLzApp();
         _nonblockingLzReceive(_srcChainId, _srcAddress, _nonce, _payload);
     }
 
@@ -46,8 +50,8 @@ abstract contract NonblockingLzApp is LzApp {
     function retryMessage(uint16 _srcChainId, bytes calldata _srcAddress, uint64 _nonce, bytes calldata _payload) public payable virtual {
         // assert there is message to retry
         bytes32 payloadHash = failedMessages[_srcChainId][_srcAddress][_nonce];
-        require(payloadHash != bytes32(0), "NonblockingLzApp: no stored message");
-        require(keccak256(_payload) == payloadHash, "NonblockingLzApp: invalid payload");
+        if (payloadHash == bytes32(0)) revert NoStoredMessage();
+        if (keccak256(_payload) != payloadHash) revert InvalidPayload();
         // clear the stored message
         failedMessages[_srcChainId][_srcAddress][_nonce] = bytes32(0);
         // execute the message. revert if it fails again

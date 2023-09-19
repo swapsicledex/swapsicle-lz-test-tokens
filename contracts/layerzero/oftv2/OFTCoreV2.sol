@@ -22,6 +22,12 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
     bool public useCustomAdapterParams;
     mapping(uint16 => mapping(bytes => mapping(uint64 => bool))) public creditedPackets;
 
+    error AdapterParamsMustBeEmpty();
+    error AmountSDOverflow();
+    error AmountTooSmall();
+    error CallerMustBeOFTCore();
+    error UnknownPacketType();
+
     /**
      * @dev Emitted when `_amount` tokens are moved from the `_sender` to (`_dstChainId`, `_toAddress`)
      * `_nonce` is the outbound nonce
@@ -49,7 +55,7 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
     * public functions
     ************************************************************************/
     function callOnOFTReceived(uint16 _srcChainId, bytes calldata _srcAddress, uint64 _nonce, bytes32 _from, address _to, uint _amount, bytes calldata _payload, uint _gasForCall) public virtual {
-        require(_msgSender() == address(this), "OFTCore: caller must be OFTCore");
+        if (_msgSender() != address(this)) revert CallerMustBeOFTCore();
 
         // send
         _amount = _transferFrom(address(this), _to, _amount);
@@ -87,7 +93,7 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
         } else if (packetType == PT_SEND_AND_CALL) {
             _sendAndCallAck(_srcChainId, _srcAddress, _nonce, _payload);
         } else {
-            revert("OFTCore: unknown packet type");
+            revert UnknownPacketType();
         }
     }
 
@@ -96,7 +102,7 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
 
         (amount,) = _removeDust(_amount);
         amount = _debitFrom(_from, _dstChainId, _toAddress, amount); // amount returned should not have dust
-        require(amount > 0, "OFTCore: amount too small");
+        if (amount == 0) revert AmountTooSmall();
 
         bytes memory lzPayload = _encodeSendPayload(_toAddress, _ld2sd(amount));
         _lzSend(_dstChainId, lzPayload, _refundAddress, _zroPaymentAddress, _adapterParams, _nativeFee);
@@ -121,7 +127,7 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
 
         (amount,) = _removeDust(_amount);
         amount = _debitFrom(_from, _dstChainId, _toAddress, amount);
-        require(amount > 0, "OFTCore: amount too small");
+        if (amount == 0) revert AmountTooSmall();
 
         // encode the msg.sender into the payload instead of _from
         bytes memory lzPayload = _encodeSendAndCallPayload(msg.sender, _toAddress, _ld2sd(amount), _payload, _dstGasForCall);
@@ -178,13 +184,13 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
         if (useCustomAdapterParams) {
             _checkGasLimit(_dstChainId, _pkType, _adapterParams, _extraGas);
         } else {
-            require(_adapterParams.length == 0, "OFTCore: _adapterParams must be empty.");
+            if (_adapterParams.length > 0) revert AdapterParamsMustBeEmpty();
         }
     }
 
     function _ld2sd(uint _amount) internal virtual view returns (uint64) {
         uint amountSD = _amount / _ld2sdRate();
-        require(amountSD <= type(uint64).max, "OFTCore: amountSD overflow");
+        if (amountSD > type(uint64).max) revert AmountSDOverflow();
         return uint64(amountSD);
     }
 
@@ -202,7 +208,7 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
     }
 
     function _decodeSendPayload(bytes memory _payload) internal virtual view returns (address to, uint64 amountSD) {
-        require(_payload.toUint8(0) == PT_SEND && _payload.length == 41, "OFTCore: invalid payload");
+        if (_payload.toUint8(0) != PT_SEND || _payload.length != 41) revert InvalidPayload();
 
         to = _payload.toAddress(13); // drop the first 12 bytes of bytes32
         amountSD = _payload.toUint64(33);
@@ -220,7 +226,7 @@ abstract contract OFTCoreV2 is NonblockingLzApp {
     }
 
     function _decodeSendAndCallPayload(bytes memory _payload) internal virtual view returns (bytes32 from, address to, uint64 amountSD, bytes memory payload, uint64 dstGasForCall) {
-        require(_payload.toUint8(0) == PT_SEND_AND_CALL, "OFTCore: invalid payload");
+        if (_payload.toUint8(0) != PT_SEND_AND_CALL) revert InvalidPayload();
 
         to = _payload.toAddress(13); // drop the first 12 bytes of bytes32
         amountSD = _payload.toUint64(33);
